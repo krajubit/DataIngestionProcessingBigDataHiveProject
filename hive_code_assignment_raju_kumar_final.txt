@@ -1,0 +1,772 @@
+/****************************Problem Statement and Purpose*********************************/
+/*******The New York City Taxi & Limousine Commission (TLC) has provided a dataset of trips made by the taxis in the New York city.**********/
+/*******The detailed trip-level data is more than just a vast list of taxi pickup and drop off coordinates.**********/
+/*****The purpose of this dataset is to get a better understanding of the taxi system, so that the city can improve the efficiency of in-city commutes.***/
+
+/******************Data Understanding*********************************/
+/**The records include fields capturing pick-up and drop-off dates/times, pick-up and drop-off locations (location coordinates of the starting and ending points), **/
+/***trip distances, itemized fares, rate types, payment types, driver-reported passenger counts etc. **/
+
+/*****************The dataset has been placed in the HDFS storage of the lab. The path to the data files is as follows: **********/
+/*******November data: '/common_folder/nyc_taxi_data/nov/' **********/
+/*******December data: '/common_folder/nyc_taxi_data/dec/' **********/
+
+
+/************************ Schema Creation for Data Set ******************************/
+
+
+/* IMPORTANT: BEFORE CREATING ANY TABLE, MAKE SURE YOU RUN THIS COMMAND */
+ADD JAR /opt/cloudera/parcels/CDH/lib/hive/lib/hive-hcatalog-core-1.1.0-cdh5.11.2.jar;
+
+/******** Following type of Schemas can be created for data set analysis *****************/
+/****** 1. Create plain External table using file parent directory to load all the data in subdirectories in the table ******/
+/****** 2. Create External table with partition option pointing to local location for storing partioned data ******/
+/****** 3. Create External table with partition and orc option pointing to local location for storing partioned data ******/
+/****** 4. Create External table with partition and clustering option pointing to local location for storing partioned  ******/
+/****** 5. Create External table with partition,clustering and orc option pointing to local location for storing partioned data ******/
+
+/*******Run following Set commands to allow creation of table from data in multiple sub directories *****************/
+set hive.input.dir.recursive=true;
+set hive.mapred.supports.subdirectories=true;
+set hive.supports.subdirectories=true;
+set mapreduce.input.fileinputformat.input.dir.recursive=true; 
+
+/***** table will be dropped if exists **********/
+drop table rk_hive_test_db.nyc_taxi_data_rk;
+
+/****************************Schema Type 1 : No Partition Table *************************************************/
+/****** Create plain External table using file parent directory to load all the data in subdirectories in the table ******/
+
+create external table if not exists rk_hive_test_db.nyc_taxi_data_rk(VendorID int,tpep_pickup_datetime timestamp,tpep_dropoff_datetime timestamp,passenger_count int, trip_distance float,RatecodeID array<int>,store_and_fwd_flag string,PULocationID int,DOLocationID int,payment_type array<int>,fare_amount float,extra float,mta_tax float,tip_amount float,tolls_amount float,improvement_surcharge float,total_amount float)
+    COMMENT 'NYC Taxi Data'
+    ROW FORMAT DELIMITED
+    FIELDS TERMINATED BY ','
+    STORED AS TEXTFILE
+    LOCATION '/common_folder/nyc_taxi_data';
+	
+/*****Describe created table	*************/
+describe rk_hive_test_db.nyc_taxi_data_rk;
+/***************************************************
+1	vendorid	int	
+2	tpep_pickup_datetime	timestamp	- 0 null
+3	tpep_dropoff_datetime	timestamp	- 0 null
+4	passenger_count	int	- 0 null
+5	trip_distance	float	- 0 null
+6	ratecodeid	array<int>	
+7	store_and_fwd_flag	string	
+8	pulocationid	int	
+9	dolocationid	int	
+10	payment_type	array<int>	
+11	fare_amount	float	
+12	extra	float	
+13	mta_tax	float	
+14	tip_amount	float	
+15	tolls_amount	float	
+16	improvement_surcharge	float	
+17	total_amount	float	
+/***************************************************
+
+/******Get the total counts ******************************/
+select count(*) from rk_hive_test_db.nyc_taxi_data_rk;
+/***Total row count : 18793083 ********************/
+
+/****************************Schema Type 2 : Partition Table *************************************************/
+/****** Create External table with partition option pointing to local location for storing partioned data ******/
+
+/**************** Deciding fields for partition *******************************/
+/**** Based upon problem statement and analysis question, most of the time we will be using year and month as filter conditions in where clause, **/
+/**********So we will use year and month as partitions to improve query performance based upon year and monthS****************************/
+
+/************Create the folder to store partition data and give full access *******************/	
+
+/*************************************************************	Create it if path does not exist********
+hadoop fs -mkdir /user/hive/warehouse/rknyctaxidata
+hadoop fs -chmod 777  /user/hive/warehouse/rknyctaxidata
+hadoop fs -ls /user/hive/warehouse/rknyctaxidata
+*************************************************************************/	
+
+/*******Run following Set commands to allow creation of table using partitions *****************/
+SET hive.exec.max.dynamic.partitions=1000;
+SET hive.exec.max.dynamic.partitions.pernode=1000;
+SET hive.exec.dynamic.partition = true;
+SET hive.exec.dynamic.partition.mode = nonstrict;
+
+/***** table will be dropped if exists **********/
+drop table nyc_taxi_data_partition_rk;
+
+/* Then create external table */
+create external table if not exists rk_hive_test_db.nyc_taxi_data_partition_rk(VendorID int,tpep_pickup_datetime timestamp,tpep_dropoff_datetime timestamp,passenger_count int, trip_distance float,RatecodeID array<int>,store_and_fwd_flag string,PULocationID int,DOLocationID int,payment_type array<int>,fare_amount float,extra float,mta_tax float,tip_amount float,tolls_amount float,improvement_surcharge float,total_amount float) partitioned by (yr int, mnth int)
+location '/user/hive/warehouse/rknyctaxidata';
+
+/* Then insert the data in the table */
+insert overwrite table nyc_taxi_data_partition_rk partition(yr, mnth)
+select VendorID ,tpep_pickup_datetime ,tpep_dropoff_datetime ,passenger_count , trip_distance ,RatecodeID ,store_and_fwd_flag ,PULocationID ,DOLocationID ,payment_type ,fare_amount ,extra ,mta_tax ,tip_amount ,tolls_amount ,improvement_surcharge ,total_amount , year(tpep_pickup_datetime) as yr, month(tpep_pickup_datetime) as mnth
+from nyc_taxi_data_rk;
+
+/******Get the total counts ******************************/
+select count(*) from nyc_taxi_data_partition_rk;
+/***Total row count : 18793083 ********************/
+
+/****************************Schema Type 3 : Partition with ORC *************************************************/
+/****** Create External table with partition and orc option pointing to local location for storing partioned data ******/
+
+/************Create the folder to store partition data and give full access *******************/
+/*************************************************************	Create it if path does not exist
+hadoop fs -mkdir /user/hive/warehouse/rkorcnyctaxidata
+hadoop fs -chmod 777  /user/hive/warehouse/rkorcnyctaxidata
+hadoop fs -ls /user/hive/warehouse/rkorcnyctaxidata
+**********************************************************/
+
+
+/***** table will be dropped if exists **********/
+drop table nyc_taxi_data_partition_orc_rk;
+
+/* Then create external table */
+create external table if not exists rk_hive_test_db.nyc_taxi_data_partition_orc_rk(VendorID int,tpep_pickup_datetime timestamp,tpep_dropoff_datetime timestamp,passenger_count int, trip_distance float,RatecodeID array<int>,store_and_fwd_flag string,PULocationID int,DOLocationID int,payment_type array<int>,fare_amount float,extra float,mta_tax float,tip_amount float,tolls_amount float,improvement_surcharge float,total_amount float) partitioned by (yr int, mnth int)
+stored as orc location '/user/hive/warehouse/rkorcnyctaxidata'
+tblproperties ("orc.compress"="SNAPPY");
+
+/* Then insert the data in the table */
+insert overwrite table nyc_taxi_data_partition_orc_rk partition(yr , mnth) select * from nyc_taxi_data_partition_rk;
+
+/******Get the total counts ******************************/
+select count(*) from nyc_taxi_data_partition_orc_rk;
+/***Total row count : 18793083 ********************/
+
+/****************************Schema Type 4 : Partition Table with Clustering *************************************************/
+/****** Create External table with partition and clustering option pointing to local location for storing partioned  ******/
+
+/********** Determining number of clusters required *************/
+/*** Todate Data size for both files : 781 MB + 799 MB = 1580 MB ***/
+/*** Assuming One Block  Size = 128 MB = 12  ***/
+/*** Total  Number of Clusters required = 1580/128 = 12 *******/
+
+/********** Deciding on  clusters column *************/
+/******We need to run couple of queries using  pick up date and since their are many dates, we will use it as a cluster field for bucketing ************/
+
+/************Create the folder to store partition data and give full access *******************/
+/*************************************************************	Create it if path does not exist	
+hadoop fs -mkdir /user/hive/warehouse/rkclusparnyctaxidata
+hadoop fs -chmod 777  /user/hive/warehouse/rkclusparnyctaxidata
+hadoop fs -ls /user/hive/warehouse/rkclusparnyctaxidata
+******************************************************************************************/
+
+/***** table will be dropped if exists **********/
+drop table nyc_taxi_data_partition_clus_rk;
+
+/* Then create external table */
+	create external table if not exists rk_hive_test_db.nyc_taxi_data_partition_clus_rk(VendorID int,tpep_pickup_datetime timestamp,tpep_dropoff_datetime timestamp,passenger_count int, trip_distance float,RatecodeID array<int>,store_and_fwd_flag string,PULocationID int,DOLocationID int,payment_type array<int>,fare_amount float,extra float,mta_tax float,tip_amount float,tolls_amount float,improvement_surcharge float,total_amount float) partitioned by (yr int, mnth int) clustered by (tpep_pickup_datetime) into 12 buckets
+    location '/user/hive/warehouse/rkclusparnyctaxidata';
+
+/* Then insert the data in the table */
+insert overwrite table nyc_taxi_data_partition_clus_rk partition(yr , mnth) select * from nyc_taxi_data_partition_rk;
+
+/******Get the total counts ******************************/
+select count(*) from nyc_taxi_data_partition_clus_rk;
+/***Total row count : 18793083 ********************/
+
+
+/****************************Schema Type 5 : Partition Table with Clustering and ORC *************************************************/
+/****** Create External table with partition,clustering and orc option pointing to local location for storing partioned data  ******/
+
+/************Create the folder to store partition data and give full access *******************/	
+/*************************************************************	Create it if path does not exist
+hadoop fs -mkdir /user/hive/warehouse/rkclusorcnyctaxidata
+hadoop fs -chmod 777  /user/hive/warehouse/rkclusorcnyctaxidata
+hadoop fs -ls /user/hive/warehouse/rkclusorcnyctaxidata
+******************************************************************************************/
+
+/***** table will be dropped if exists **********/
+drop table nyc_taxi_data_part_clus_orc_rk;
+
+/* Then create external table */
+	create external table if not exists rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk(VendorID int,tpep_pickup_datetime timestamp,tpep_dropoff_datetime timestamp,passenger_count int, trip_distance float,RatecodeID array<int>,store_and_fwd_flag string,PULocationID int,DOLocationID int,payment_type array<int>,fare_amount float,extra float,mta_tax float,tip_amount float,tolls_amount float,improvement_surcharge float,total_amount float) partitioned by (yr int, mnth int) clustered by (tpep_pickup_datetime) into 12 buckets
+   stored as orc location '/user/hive/warehouse/rkclusorcnyctaxidata'
+   tblproperties ("orc.compress"="SNAPPY");
+
+/* Then insert the data in the table */
+insert overwrite table nyc_taxi_data_part_clus_orc_rk partition(yr , mnth) select * from nyc_taxi_data_partition_rk;
+
+/******Get the total counts ******************************/
+select count(*) from nyc_taxi_data_part_clus_orc_rk;
+/***Total row count : 18793083 ********************/
+
+/*********** Schema  Creation is complete ******************************/
+/******** Table nyc_taxi_data_part_clus_orc_rk shoud be more performing table as its a partitioned with clustering and ORC option ************/
+
+
+/*************** Basic Data Quality Checks **************************************************/
+
+	
+/******Get the total counts ******************************/
+select count(*) from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk;
+/***Total row count : 18793083 ********************/
+
+/******Get the total counts when vendor id is not null******************************/
+select count(*) from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk where vendorid is not null;
+/***Total row count when vendor id is not null : 18793079 ********************/
+
+/******Get the total counts when vendor id is null******************************/
+select count(*) from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk where vendorid is null;
+/***Total row count when vendor id is null : 4 ********************/
+ 
+/******Get the total counts of distinct vendor id ******************************/
+select count(Distinct vendorid) from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk where vendorid is not null;
+/***Total unique vendor id count is  : 2 ********************/
+/**** 1= Creative Mobile Technologies, LLC; 2= VeriFone Inc *************/
+
+/*************How many records has each TPEP provider provided? Write a query that summarises the number of records of each provider. **************/
+
+select VendorID,count(*) from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk where vendorid is not null group by VendorID;
+/*****************
+2		10345930
+null	2
+1		8447149
+******************/
+
+/********************Below are the List of queries ran for checking Data Quality issues and understanding the Data distribution *************/
+
+/*** Check the trip count grouped  by vendorid,year(tpep_dropoff_datetime) ***************/
+ select vendorid, year(tpep_dropoff_datetime), count (*) from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+where vendorid is not null group by vendorid,year(tpep_dropoff_datetime);
+
+/*********************
+1	1	2019	1
+2	2	2041	1
+3	2	2017	10344589
+4	2	2018	1268
+5	2	2001	1
+6	2	2003	4
+7	2	2008	15
+8	2	2009	52
+9	1	2016	1
+10	1	2017	8446659
+11	1	2018	488
+***********************/
+
+/*********** year 2041 is invalid and bad data *******************/
+/*********It includes  data from years other than 2017 also. We need to analyse data only for 2017**********/
+
+/***********Check the count of trips where either of date is not from year 2017 ************************/
+select vendorid,year(tpep_pickup_datetime),year(tpep_dropoff_datetime) from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+where vendorid is not null and (year(tpep_pickup_datetime) <> 2017 or year(tpep_dropoff_datetime) <> 2017);
+
+/***** 1831 records are such that where either tpep_pickup_datetime or tpep_dropoff_datetime is not from year 2017 *********/
+/***For our analysis purpose we will assume that only those records are eligible for analysis where both tpep_pickup_datetime and tpep_dropoff_datetime are from 2017 ***/
+
+/*******Check tpep_pickup_datetime date range ***************************/
+select max(tpep_pickup_datetime),min(tpep_pickup_datetime) from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk where vendorid is not null;
+/***** 2041-11-15 02:57:16.0	2001-01-01 00:04:13.0 ***********/
+
+
+
+/*************From here onwards, our analysis of data quality check and understanding will be limited to year 2017 only for not null vendorId **********/
+
+/**** Check the uniques months for pick up ***********/
+ select distinct month(tpep_pickup_datetime) from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017);
+/********** We can see it includes months : Octover, November and Descember where we don't to analyse data for October month
+--10
+--11
+--12
+--Vendor 1 has data only for Nov and dec for year 2017 but vendor 2 also has data for month oct, nov and dec for year 2017
+*********************************************************/
+
+  select distinct month(tpep_dropoff_datetime) from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017);
+
+/********** We can see it includes months : Octover, November and Descember where we don't to analyse data for October month
+--10
+--11
+--12
+*********************************************************/
+
+/*******From here onwards, our analysis of data quality check and understanding will be limited to year 2017, months nov and dec and for not null vendorId **********/
+
+/********Get the row count for year 2017 and months nov and dec and for not null vendorid ***********/ 
+select count(*) from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017)
+and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12) ;
+/***Total row count  : 18791040 ********************/
+
+/*************How many records has each TPEP provider provided? This is for year 2017 and months nov and dec and for not null vendorid  **************/
+select VendorID,count(*) from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017) and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12) group by VendorID;
+/********Result ********
+1	8446659
+2	10344381
+****************************/
+
+/********** Get the count of tripts grouped by vendoid and drop month *************************/
+ select vendorid, month(tpep_dropoff_datetime), count (*) from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017) 
+and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12) group by vendorid,month(tpep_dropoff_datetime);
+
+/********Result ********
+1	1	11	4187308
+2	1	12	4259351
+3	2	11	5093265
+4	2	12	5251116
+****************************/
+
+/********** Get the count of tripts grouped by vendoid and pickup month *************************/
+ select vendorid, month(tpep_pickup_datetime), count (*) from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017) 
+and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12) group by vendorid,month(tpep_pickup_datetime);
+/********Result ********
+1	1	11	4188894
+2	1	12	4257765
+3	2	11	5095821
+4	2	12	5248560
+****************************/
+
+/*****************Check for missing values for each column ************************/
+select * from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk where vendorid is not null and 
+(tpep_pickup_datetime is null or tpep_dropoff_datetime is null or passenger_count is null or trip_distance is null or
+ ratecodeid is null or store_and_fwd_flag is null or pulocationid is null or dolocationid is null or payment_type is null or
+ fare_amount is null or extra is null or mta_tax is null or tip_amount is null or tolls_amount is null or improvement_surcharge is null or total_amount is null) ;
+/***** 0 results  . no missing data ****************/
+
+ 
+ /*********Check the count of trips grouped by  passenger_count ***********/
+ select passenger_count,count(*) from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017)
+and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12)
+ group by  passenger_count;
+
+ /**************
+1   0	108965
+2	1	13250091
+3	2	2815818
+4	3	810689
+5	4	398801
+6	5	875733
+7	6	530959
+8	7	75
+9	8	60
+10	9	56
+11	192	1
+************************/
+/********Here we can see one invalid passenger count 192 also for one trip **************/
+
+/****** Check the trip counts and average fares grouped by vendorid,passenger_count ***********************/
+ select vendorid,passenger_count,count(*),sum(fare_amount) from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017)
+and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12)
+ group by  vendorid,passenger_count;
+
+/******* Here we are showing count for only passenger_count 0 and 192 to check if their is any amount for fare charged ***********/
+2	192	1	6.5
+1	0		108745	1373328.3600013666
+2	0		220	11912.84000856243
+**************************************************************/
+
+/************Check trip_distance related results grouped by vendorid ***************************/
+select vendorid,min(trip_distance),max(trip_distance),avg(trip_distance), variance(trip_distance) from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017) 
+and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12) group by vendorid;
+/*******************************
+1	0	702.5	2.773332343498796	12.848873972886192
+2	0	687.219970703125	2.9456372376474365	14.32363363111327
+***************************************/
+
+/************Check trip counts grouped by vendorid when trip_distance is 0 ***************************/
+select vendorid, count(*) from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017)
+and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12)
+and trip_distance = 0 group by vendorid;
+/*******************************
+1	68747
+2	51252
+***************************************/
+
+/************Check trip counts grouped by vendorid passenger_count and when trip_distance is 0 ***************************/
+select vendorid, count(*),avg(total_amount) from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017)
+and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12)
+and trip_distance = 0 and passenger_count =0 group by vendorid;
+
+/*******************************
+1	1521	22.929559541367762
+2	154		50.9985068401733
+***************************************/
+
+/************Check trip counts grouped by vendorid ratecodeid  ***************************/
+ select vendorid,ratecodeid,count(*),avg(fare_amount),avg(extra),avg(mta_tax),avg(tip_amount),avg(tolls_amount),avg(improvement_surcharge)
+ ,avg(total_amount) from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017)
+and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12)
+ group by  vendorid,ratecodeid;
+ 
+/*****************************************************************************************************
+1   1	[99]	172	53.844767576040226	0.04941860465116279	1.9648255726625754	1.398313961749853	0.6945348894873331	
+2	1	[1]	8231740	11.807127846754613	0.3117672752054496	0.49991282159024253	1.669586656696165	0.18808172374333731	
+3	1	[2]	167900	52.008505182305996	0.7893644431197019	0.499815366289458	7.042671404374567	4.365589268085818	
+4	1	[3]	18209	64.05921137879568	0.22035806553126416	0	9.494640560981093	13.443019388069352	
+5	1	[4]	4121	62.34545013239823	0.3593787915554477	0.49866537248240717	7.269386072017775	1.4924145159111588	
+6	1	[5]	24385	54.021628051751186	0.0002050440844781628	0.001455812999794956	6.044001213114526	3.2277937466515847	
+7	2	[99]	6	6.03333334128062	0.5	0	0	0.25	
+8	1	[6]	132	38.208712137106694	0	0.49242424242424243	1.2603030362815568	0.17454546148126776	
+9	2	[1]	10042574	11.924984285901713	0.3104288103820592	0.49910296901969553	1.706213792236551	0.20755594837560284	
+10	2	[2]	236731	51.74068858746767	0.811905496119627	0.4975077197325234	7.577127450812835	4.3709367179666305	
+11	2	[3]	21965	67.78005918506715	0.1794992032855403	0	10.954187109905462	13.61617710554	
+12	2	[4]	5621	73.9428037715709	0.3577655221490838	0.49973314356876003	9.03184841825678	3.07527670001797	
+13	2	[5]	37675	63.03761804874292	4.777704237625942e-05	0.28062375580623755	7.403481613748918	2.8902513818671234	
+14	2	[6]	17	4.176470588235294	0.1882353004287271	0.5	0.8823529411764706	0
+***************************************************************************************************************/
+/**********************************************************
+Vendor 2 has higher fares for same ratecodeid compared to vendor 1
+Vendor 1 has more records 172 with invalid ratecodeid 99 compared to vendor 2 which has 6
+****************************************************************************/
+ 
+ /************Check trip counts grouped by vendorid , payment_type  ***************************/
+ select vendorid,payment_type,count(*),avg(fare_amount),avg(extra),avg(mta_tax),avg(tip_amount),avg(tolls_amount),avg(improvement_surcharge)
+ ,avg(total_amount) from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017)
+and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12)
+ group by  vendorid,payment_type;
+ 
+/******************************************************************************************** 
+A numeric code signifying how the passenger paid for the trip.  1= Credit card 2= Cash 3= No charge 4= Dispute 5= Unknown 6= Voided trip 
+
+1	1	[1]	5656789	13.21565668969973	0.32704141519200386	0.4974791140340064	2.7005109866651513	0.34657305356464885	0.299990996205118	17.387252226866092
+2	1	[2]	2671182	11.802571685547457	0.30467568290082475	0.49814040376126684	9.901983305834854e-06	0.2194838686536838	0.29992139503584037	13.124802971933708
+3	1	[3]	93993	21.60384285214098	0.34559594873238386	0.47708680433641704	0.003858691625595194	0.5322526242189952	0.2998021248363684	23.262439056168706
+4	1	[4]	24695	14.773363028834101	0.327854221527044	0.4844681108980243	0.003753796321801701	0.5753674931282649	0.29998786371230696	16.46479446621143
+5	2	[1]	6980979	13.700720461977241	0.3283775384508509	0.4977529655940807	2.7932857965253937	0.3970576240691896	0.2999043949555323	18.02451511788273
+6	2	[2]	3354257	12.141315698248487	0.30609133408649275	0.4988223919634065	0	0.23040371287578945	0.2998498296239667	13.476568703701902
+7	2	[3]	6519	-9.161796288393937	-0.37436723423838014	-0.48619420156465715	-0.1051649024867494	-0.029641050048210188	-0.2998619539310896	-10.460316054530992
+8	2	[4]	2834	-8.530769230028906	-0.3514467184191955	-0.4827099505998589	-0.12236415034839614	-0.03585038895159434	-0.2997882970219022	-9.82705
+
+Vendor 1 has more disputed (24695) and no charge records (93993)  compare to vendor 2 disputed (2834) and no charge records (6519) 
+We don't have any records for payment type 5 and 6
+********************************************************************************************************************/
+
+ /************Check trip counts grouped by vendorid  to analyze the fare amount charged by each vendor  ***************************/
+ select vendorid,count(*),avg(fare_amount),avg(extra),avg(mta_tax),avg(tip_amount),avg(tolls_amount),avg(improvement_surcharge)
+ ,avg(total_amount), (avg(total_amount) - avg(fare_amount)) as fare_extra_difference from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017)
+and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12)
+ group by  vendorid;
+ 
+/********************************************************************************************************
+1	8446659	12.86667742019797	0.32017729613741536	0.49742327942867837	1.8086089048638374	0.3091173347343629	0.2999668745572539	16.101971101578386 3.2352936813804156
+2	10344589	13.174581711268697	0.32052208164056	0.49721105401094234	1.8849310626590048	0.34263220821522833	0.29934444694185897	16.524252027113768 3.3496703158450707
+
+Vendor 2 avergae fare is little bit higher than vendor 1 and also people pay bit extra for vendor 2 than vendor 1
+********************************************************************************************************************/
+
+/*****************Summary of Identification of the data quality issues. **********************************
+Commonn data quality issues :
+1. Their are few null rows.
+2. Data includes years other than 2017 
+3. Data includes month other than Nov and Dec in year 2017
+4. Invalid passenger count 192 found for one trip 
+5. Few trips are such that trip starts on one date and completes on next date causing change of dates for single trip
+6. Trip with 0 trip distance or 0 passenger count but fares showing some amount.
+ 
+***************Vendor specific Issues ***********************************
+
+1.	Vendor 1 has more disputed (24695) and no charge records (93993)  compare to vendor 2 disputed (2834) and no charge records (6519) 
+2.	Vendor 1 has more records 172 with invalid ratecodeid 99 compared to vendor 2 which has 6
+3.	Vendor 1 has  67226 records with trip_distance = 0 and passenger_count <> 0 which is much higher compared to Vendor 2 which has 51101 records with trip_distance = 0 and passenger_count <> 0 
+4.	Vendor 1 has  1521 records with trip_distance = 0 and passenger_count =0 with some amount charged which is much higher compared to 
+5.	Vendor 2 which has  154 records with trip_distance = 0 and passenger_count =0 with some amount charged
+6.	Vendor 1 has  108745 records with passenger_count =0 compared to vendor 2 220 records with passenger_count =0 
+
+****************************************************************************************/
+
+/***********************Conclude which vendor is doing a bad job in providing the records? *************************************/
+Based upon above analysis, vendor 1 has more bad quality data compared to vendor 2 since vendor 1 records has more data quality issues.
+Vendor 2 is charging little bit higher fare than vendor 1 but data quality issues are less and vendor 2 seems to be more reliable.
+/*************************************************************************************************************************************/
+
+/****************************Analysis-I *******************************************************/
+
+/****************************Compare the overall average fare for November and December.********************/
+
+ select month(tpep_pickup_datetime),month(tpep_dropoff_datetime),count(*),avg(fare_amount) as avg_fare,avg(extra) as avg_extra,avg(mta_tax) as avg_mta_tax,avg(tip_amount)as avg_tip_amt,avg(tolls_amount) as avg_toll_amt,
+ avg(improvement_surcharge) as avg_impov_surchg,avg(total_amount) as avg_total_amt from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017)
+and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12)
+ group by  month(tpep_pickup_datetime),month(tpep_dropoff_datetime);
+ 
+/***************************Result***************************************************************************************
+_c1	_c2	avg_fare	avg_extra	avg_mta_tax	avg_tip_amt	avg_toll_amt	avg_impov_surchg	avg_total_amt
+_c1	_c2	avg_fare	avg_extra	avg_mta_tax	avg_tip_amt	avg_toll_amt	avg_impov_surchg	avg_total_amt
+11	11	9280573	13.13774634496685	0.31851288277194545	0.4973421845824935	1.887745591916017	0.34049085958847297	0.2996330571934986	16.48389305131759
+11	12	4142	20.1494954121072	0.4734427812650893	0.49770642201834864	2.9114968661508485	0.5450893490859012	0.29971029679594496	24.87882412573613
+12	12	9506325	12.93393897867545	0.32210797337618075	0.49727132935161117	1.813925691480482	0.314861186768894	0.29961556260463323	16.184828242180174
+
+Here we will assume that average fare where pick up and drop dates are not same will  be applicable for both Nov and Dec months , so will not include
+in analysing average fare.
+We can see that average fare in December month 9506325 is slighly higher than Novemeber month
+************************************************************************************************************************/
+
+/********Explore the ‘number of passengers per trip’ - how many trips are made by each level of ‘Passenger_count’? ***********
+*********Do most people travel solo or with other people? ******************************************************/
+
+ select passenger_count,count(*) as count from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017)
+and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12)
+ group by  passenger_count;
+ 
+/***************************Result*************************************************************************************** 
+passenger_count	_c1
+passenger_count	_c1
+0	108965
+1	13249946
+2	2815794
+3	810682
+4	398798
+5	875708
+6	530955
+7	75
+8	60
+9	56
+192	1
+
+Here we can see the number of trips made by each level of 'Passenger_count' as above.
+We can conclude that ost people travel solo (13249946) .
+************************************************************************************************************************/
+
+/********Which is the most preferred mode of payment?*******************************************************/
+
+ select payment_type,count(*) as count,avg(fare_amount) as avg_fare,avg(extra) as avg_extra,avg(mta_tax) as avg_mta_tax,avg(tip_amount)as avg_tip_amt,avg(tolls_amount) as avg_toll_amt,
+ avg(improvement_surcharge) as avg_impov_surchg,avg(total_amount) from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017)
+and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12)
+ group by  payment_type;
+ 
+ /***************************Result***************************************************************************************
+payment_type is a numeric code signifying how the passenger paid for the trip.  1= Credit card 2= Cash 3= No charge 4= Dispute 5= Unknown 6= Voided trip 
+ 
+payment_type	count	avg_fare	avg_extra	avg_mta_tax	avg_tip_amt	avg_toll_amt	avg_impov_surchg	_c8
+[1]	12637627	13.483599509623382	0.32777838592638026	0.4976303605097154	2.7517616915175047	0.3744635011396812	0.2999431578905398	17.739273350946984
+[2]	6025372	11.991170538549971	0.30546192002773404	0.4985200382648288	4.389770386101731e-06	0.22556430805889865	0.2998815544996766	13.32065049303949
+[3]	100512	19.608447261991074	0.29890062887220387	0.41461039477866174	-0.0032123527275006985	0.49580936508030615	0.2609091555442933	21.075251053078016
+[4]	27529	12.374296196707334	0.2579229176726489	0.38490101342681204	-0.009229539827834707	0.5124450666756396	0.23824331652495	13.758153914652882
+
+Here payment_type 1  (Credit card) is the most preferred mode of payment;
+************************************************************************************************************************/
+
+/********What is the average tip paid? Compare the average tip with the 25th, 50th and 75th percentiles and comment whether the ‘average tip’ *************
+is a representative statistic (of the central tendency) of ‘tip amount paid’.
+**********************************************************************************************************************************/
+
+ select avg(tip_amount)as avg_tip_amt from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017)
+and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12);
+/***************************Result***************************************************************************************
+avg_tip_amt
+1.8506260079424872
+Average tip paid is 1.8506260079424872
+************************************************************************************************************************/
+
+/********Checking distinct tip_amount to decide on B paramter in percentile_approx function **************************/
+select count(distinct tip_amount)as count from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017)
+and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12);
+
+/**************************Result  4141 (B value should be more than this count)*********************************/
+
+/************* Get average tip along with the 25th, 50th and 75th percentiles tip amount ************************/
+select avg(tip_amount)as avg_tip_amt,percentile_approx(tip_amount, 0.25,4200) as tip_25_percentile, percentile_approx(tip_amount, 0.5,4200) as tip_50_percentile,
+percentile_approx(tip_amount, 0.75,4200) as tip_75_percentile from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017)
+and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12);
+
+/***************************Result***************************************************************************************
+avg_tip_amt			tip_25_percentile		tip_50_percentile	tip_75_percentile
+1.8506260079424872	-0.005955277471055294	1.351981399324019	2.448505088955382
+
+Here 'average tip' is not a representative statistic (of the central tendency) of ‘tip amount paid’ as the tip amount 
+median value is 1.351981399324019 which  is lower than the average tip amount 1.8506260079424872
+************************************************************************************************************************/
+
+/********Explore the ‘Extra’ (charge) variable - what fraction of total trips have an extra charge is levied? ***************/
+
+ select avg(tip_amount)as avg_tip_amt , avg(extra) as avg_extra,sum(tip_amount)as total_tip_amt , sum(extra) as total_extra, 
+( avg(extra)/avg(tip_amount))*100 as fraction_avg_extra_of_tip,( sum(extra)/sum(tip_amount))*100 as fraction_total_extra_of_tip from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017)
+and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12);
+
+/***************************Result***************************************************************************************
+avg_tip_amt			avg_extra			total_tip_amt		total_extra		 fraction_avg_extra_of_tip	fraction_total_extra_of_tip
+1.8506260079424872	0.3203657775200736	34775187.340287596	6020006.140010804	17.31121124123042		17.31121124123042
+
+Here average or total tip amount is much higher than average or total extra amount.
+Also Extra amount is around 17.3% of total tip amount generally.
+************************************************************************************************************************/
+
+/***************************Analysis-II ************************************************************/
+
+/**********What is the correlation between the number of passengers and tip paid? Do multiple travellers pay more compared to solo travellers? **********/
+
+/************* Get the average tip amount for each level of passenger_count **************************/
+ select passenger_count,avg(tip_amount)as avg_tip_amt from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017)
+and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12)
+ group by  passenger_count;
+ 
+/***************************Result***************************************************************************************
+  passenger_count	avg_tip_amt
+
+1	0	1.7632504947897043
+2	1	1.8579490524419435
+3	2	1.8641309281270322
+4	3	1.7727101509516048
+5	4	1.631771223140227
+6	5	1.8734892117975077
+7	6	1.8583563585532976
+8	7	3.630133365790049
+9	8	8.546833296616873
+10	9	6.2632143050432205
+11	192	1.2400000095367432
+
+We don't see any clear trend where average tip amount is increasing with passenger count.
+But when passenger count is more than 6 then we see that average tip amount is much higher.
+
+************************************************************************************************************************/
+
+/*************** Get the corelation between passenger_count and  tip_amount *********************/
+select corr(passenger_count,tip_amount)
+from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017)
+and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12);
+
+/***************************Result***************************************************************************************
+-0.0037971068726033474
+
+Correlation tells that both are not much linearly related . It has a sligh negative corelation .
+************************************************************************************************************************/
+
+
+/***************Create five buckets of ‘tip paid’: [0-5), [5-10), [10-15) , [15-20) and >=20.  ************************/
+/***************Calculate the percentage share of each bucket (i.e. the fraction of trips falling in each bucket).*****/
+
+/*********** Get total tip amount ***************************************/
+select sum(tip_amount) as total_tip_amount_in_bucket
+   from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+	where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017)
+	and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12);
+
+/***************************Result***************************************************************************************
+34775187.340287596
+************************************************************************************************************************/
+	
+/*********** Get  tip amount for bucket [0-5) and faction of total tip amount***************************************/
+select sum(tip_amount)  as tip_amount_1_5_bucket,(sum(tip_amount)/(34775187))*100 as tip_1_5_bucket_fraction
+   from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+	where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017)
+	and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12)
+   and tip_amount > 0 and tip_amount <= 5  ;
+
+ /***************************Result***************************************************************************************
+tip_amount_1_5_bucket	tip_1_5_bucket_fraction
+22998149.883710835		66.13379213089733
+************************************************************************************************************************/
+
+/*********** Get  tip amount for bucket [5-10) and faction of total tip amount***************************************/
+select sum(tip_amount)  as tip_amount_5_10_bucket,(sum(tip_amount)/(34775187))*100 as tip_5_10_bucket_fraction
+   from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+	where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017)
+	and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12)
+   and tip_amount > 5 and tip_amount <= 10  ;
+   
+ /***************************Result***************************************************************************************   
+tip_amount_5_10_bucket	tip_5_10_bucket_fraction   
+6814925.98917532	19.59709372425609
+************************************************************************************************************************/
+
+/*********** Get  tip amount for bucket [10-15) and faction of total tip amount***************************************/
+select sum(tip_amount)  as tip_amount_10_15_bucket,(sum(tip_amount)/(34775187))*100 as tip_10_15_bucket_fraction
+   from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+	where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017)
+	and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12)
+   and tip_amount > 10 and tip_amount <= 15  ;
+   
+/***************************Result***************************************************************************************   
+ tip_amount_10_15_bucket	tip_10_15_bucket_fraction   
+3735927.5992069244	10.743084139869396
+************************************************************************************************************************/
+
+/*********** Get  tip amount for bucket [15-20) and faction of total tip amount***************************************/
+select sum(tip_amount)  as tip_amount_15_20_bucket,(sum(tip_amount)/(34775187))*100 as tip_15_20_bucket_fraction
+   from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+	where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017)
+	and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12)
+   and tip_amount > 15 and tip_amount <= 20  ;
+   
+/***************************Result***************************************************************************************    
+ tip_amount_15_20_bucket	tip_15_20_bucket_fraction   
+ 730931.1184225082	2.1018754505116197
+ ************************************************************************************************************************/
+ 
+/*********** Get  tip amount for bucket 20+ and faction of total tip amount***************************************/
+select sum(tip_amount)  as tip_amount_20_plus__bucket,(sum(tip_amount)/(34775187))*100 as tip_20__plus_bucket_fraction
+   from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+	where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017)
+	and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12)
+   and tip_amount > 20   ;   
+   
+/***************************Result***************************************************************************************    
+    tip_amount_10_15_bucket	tip_10_15_bucket_fraction   
+   496285.099773407			1.4271241726849866
+ ************************************************************************************************************************/
+   
+   
+/***********Which month has a greater average ‘speed’ - November or December? Note that the variable ‘speed’ will have to be derived from other metrics.**********/
+ 
+ /*** Get the average speed grouped by both pick up and drop month ***************************/
+ select month(tpep_pickup_datetime),month(tpep_dropoff_datetime), avg(trip_distance/((unix_timestamp(tpep_dropoff_datetime) - unix_timestamp(tpep_pickup_datetime))/3600)) as avg_speed from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017)
+and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12)
+ group by  month(tpep_pickup_datetime),month(tpep_dropoff_datetime);
+ 
+/***************************Result***************************************************************************************  
+11	11	12.758605943227732
+11	12	12.449429489227986
+12	12	12.705483616452682
+
+Here we will assume that trips where date changes will be applicable for both Nov and Dec months and hence won't consider it.
+November month has greater average spped 12.758605943227732 compared to December month 12.705483616452682 .
+ ************************************************************************************************************************/
+ 
+/************Analyse the average speed of the most happening days of the year i.e. 31st December (New year’s eve) and 25th December (Christmas Eve) 
+/******and compare it with the overall average.  ************************/
+
+/*** Get the overall average speed ***************************/
+ select avg(trip_distance/((unix_timestamp(tpep_dropoff_datetime) - unix_timestamp(tpep_pickup_datetime))/3600)) as overall_avg_speed from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017)
+and month(tpep_pickup_datetime) in (11,12) and  month(tpep_dropoff_datetime) in (11,12);
+
+/***************************Result*************************************************************************************** 
+overall_avg_speed
+12.731662670638789
+************************************************************************************************************************/
+
+/*** Get the  average speed for 25th December ***************************/
+ select day(tpep_pickup_datetime), day(tpep_dropoff_datetime),avg(trip_distance/((unix_timestamp(tpep_dropoff_datetime) - unix_timestamp(tpep_pickup_datetime))/3600)) as overall_avg_speed from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017)
+and month(tpep_pickup_datetime) = 12 and  month(tpep_dropoff_datetime) = 12 and day(tpep_pickup_datetime) = 25 and  day(tpep_dropoff_datetime) in (25,26)
+group by day(tpep_pickup_datetime), day(tpep_dropoff_datetime);
+
+/***************************Result*************************************************************************************** 
+25	25	16.804706410414326
+25	26	13.000195784866202
+
+Here we can see that average speed is less when date changes . 
+Average spped on 25th Dec in year 2017 is higher compared to overall_avg_speed 12.731662670638789
+************************************************************************************************************************/
+
+/*** Get the  average speed for 31st December ***************************/
+ select avg(trip_distance/((unix_timestamp(tpep_dropoff_datetime) - unix_timestamp(tpep_pickup_datetime))/3600)) as overall_avg_speed from rk_hive_test_db.nyc_taxi_data_part_clus_orc_rk 
+where vendorid is not null and (year(tpep_pickup_datetime) = 2017 and year(tpep_dropoff_datetime) = 2017)
+
+/***************************Result*************************************************************************************** 
+14.057195690169191
+Average spped on 31st Dec in year 2017 is higher compared to overall_avg_speed 12.731662670638789
+************************************************************************************************************************/
+
+
+/**********************************End of Data Analysis *****************************************************************************/
